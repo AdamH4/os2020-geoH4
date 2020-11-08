@@ -5,6 +5,9 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
+
 
 /*
  * the kernel's page table.
@@ -311,8 +314,11 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  /* char *mem; */
 
+  //va - virtual address
+  //pa - physical address
+  //pte - pagetable enty ?
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
@@ -320,11 +326,31 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    /* if((mem = kalloc()) == 0) */
+    /*   goto err; */
+    /* memmove(mem, (char*)pa, PGSIZE); */
+    /* if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){ */
+    /*   kfree(mem); */
+    /*   goto err; */
+    /* } */
+
+    // 0x000100101010 flags
+    // 0x000000000010 PTE_W
+    // 0x000000000010 => is validated as TRUE
+    // | -> LOGICAL OR(funguje ako plus[+])
+    // & -> LOGICAL AND(funguje ako krat[*])
+    // ~ -> NEGACIA
+    if (flags & PTE_W){ // skontroluje ci ziskane flags maju PTE_W 1
+      flags = (flags | PTE_COW) & (~PTE_W); // nastavi vo flags PTE_COW ako 1 a PTE_W ako 0
+      *pte = PA2PTE(pa) | flags; // prekonvertuje PA na PTE s nasimi novymi flagmi
+    }
+
+    // increase refcount, if mappages failed, uvmunmap will decrease refcnt,
+    // zvacsi pocet referencii ukazujucich na danu pagetable, ak se pokazi tak zmensi o jeden
+    // so we should increase refcnt before mappages
+    increase_rc((void*)pa);
+
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
   }
@@ -358,6 +384,12 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+
+    if (va0 >= MAXVA)
+      return -1;
+    if (page_fault_handler(pagetable, va0) != 0)
+      return -1;
+
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;

@@ -29,10 +29,57 @@ trapinithart(void)
   w_stvec((uint64)kernelvec);
 }
 
+
+int
+page_fault_handler(pagetable_t pagetable, uint64 va)
+{
+  uint64 pa;
+  pte_t *pte;
+  uint flags;
+
+  if (va >= MAXVA){
+    /* printf("page fault handler: va >= MAXVA\n"); */
+    return -1;
+  }
+
+  va = PGROUNDDOWN(va);
+  pte = walk(pagetable, va, 0);
+  if (pte == 0)
+  {
+    /* printf("page fault handler: walk failed\n"); */
+    return -1;
+  }
+
+  pa = PTE2PA(*pte);
+  if (pa == 0)
+  {
+    /* printf("page fault handler: pa == 0\n"); */
+    return -1;
+  }
+
+  flags = PTE_FLAGS(*pte);
+  // cow page
+  if (flags & PTE_COW){
+    char *mem = kalloc();
+    if (mem == 0){
+      /* printf("page fault handler: kalloc failed\n"); */
+      return -1;
+    }
+    memmove(mem, (char*)pa, PGSIZE);
+    kfree((void*)pa);
+    flags = (flags & ~PTE_COW) | PTE_W;
+    *pte = PA2PTE((uint64)mem) | flags;
+    return 0;
+  } else {
+    /* printf("page fault handler: not cow page\n"); */
+    return 0;
+  }
+}
+
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
-//
+// funkcia je volana na kotrolovanie vypadkov a podla vypadku rozhoduje co sa ma stat
 void
 usertrap(void)
 {
@@ -68,20 +115,42 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     // ok
   } else {
-    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-    p->killed = 1;
+    /* printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid); */
+    /* printf("            sepc=%p stval=%p\n", r_sepc(), r_stval()); */
+    /* p->killed = 1; */
+    if (r_scause() == 13 || r_scause() == 15){ // ak su vynimky typu 13 alebo 15
+      uint64 va = r_stval(); // stval(register), v ktorom je ulozena adresa ktora vyvolala vinimku
+      if (va >= MAXVA){ // va je viac ako 2^38 vtedy je nieco spatne
+        p->killed = 1;
+        goto done;
+      }
+      // stack gurad page.
+      if (va <= PGROUNDDOWN(p->trapframe->sp) && va >= PGROUNDDOWN(p->trapframe->sp) - PGSIZE){ //va musi byt v spravnom intervale
+        p->killed = 1;
+        goto done;
+      }
+      if (page_fault_handler(p->pagetable, va) != 0){
+        p->killed = 1;
+      }
+    }
+    else
+    {
+      p->killed = 1;
+    }
   }
-
+  done:
   if(p->killed)
     exit(-1);
+  /* if(p->killed) */
+  /*   exit(-1); */
 
-  // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
+  /* // give up the CPU if this is a timer interrupt. */
+  /* if(which_dev == 2) */
+  /*   yield(); */
 
   usertrapret();
 }
+
 
 //
 // return to user space
