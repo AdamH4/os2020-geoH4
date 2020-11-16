@@ -11,15 +11,37 @@
 #define MAX_THREAD  4
 
 
+struct context1 {
+  uint64 ra;
+  uint64 sp;
+  // callee-saved
+  uint64 s0;
+  uint64 s1;
+  uint64 s2;
+  uint64 s3;
+  uint64 s4;
+  uint64 s5;
+  uint64 s6;
+  uint64 s7;
+  uint64 s8;
+  uint64 s9;
+  uint64 s10;
+  uint64 s11;
+};
+
 struct thread {
   char       stack[STACK_SIZE]; /* the thread's stack */
   int        state;             /* FREE, RUNNING, RUNNABLE */
-
+  struct context1 context;
 };
+
+
 struct thread all_thread[MAX_THREAD];
 struct thread *current_thread;
-extern void thread_switch(uint64, uint64);
-              
+/* extern void thread_switch(uint64, uint64); // sobotna funkcia */
+extern void thread_switch(struct context1*, struct context1*);
+
+
 void 
 thread_init(void)
 {
@@ -38,9 +60,9 @@ thread_schedule(void)
   struct thread *t, *next_thread;
 
   /* Find another runnable thread. */
-  next_thread = 0;
-  t = current_thread + 1;
-  for(int i = 0; i < MAX_THREAD; i++){
+  next_thread = 0; //tu dame nulu
+  t = current_thread + 1; // tu pridame jednicku
+  for(int i = 0; i < MAX_THREAD; i++){ //
     if(t >= all_thread + MAX_THREAD)
       t = all_thread;
     if(t->state == RUNNABLE) {
@@ -63,6 +85,8 @@ thread_schedule(void)
      * Invoke thread_switch to switch from t to next_thread:
      * thread_switch(??, ??);
      */
+    /* thread_switch((uint64)t, (uint64)current_thread); Bystrica */
+    thread_switch(&t->context, &current_thread->context);
   } else
     next_thread = 0;
 }
@@ -70,13 +94,15 @@ thread_schedule(void)
 void 
 thread_create(void (*func)())
 {
-  struct thread *t;
+  struct thread *t; // zadefinovanie aby bola typu vlakno
 
-  for (t = all_thread; t < all_thread + MAX_THREAD; t++) {
-    if (t->state == FREE) break;
+  for (t = all_thread; t < all_thread + MAX_THREAD; t++) { // prechadzanie vsetkymi vlaknami
+    if (t->state == FREE) break; // ak najdem prve volne miesto pre vlakno tak vyskocim z foru
   }
-  t->state = RUNNABLE;
+  t->state = RUNNABLE; //  nastavime stav vlakna na RUNNABLE tak toto mi nerob ja tu driem
   // YOUR CODE HERE
+  t->context.sp = (uint64)t->stack  + STACK_SIZE; // nastavime stack pointer
+  t->context.ra = (uint64)func; // nastavime ra na poslednu vykonanu adresu
 }
 
 void 
