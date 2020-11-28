@@ -66,6 +66,7 @@ sys_dup(void)
   return fd;
 }
 
+
 uint64
 sys_read(void)
 {
@@ -290,6 +291,8 @@ sys_open(void)
   int fd, omode;
   struct file *f;
   struct inode *ip;
+  int cnt = 0, length;
+  char next[MAXPATH+1];
   int n;
 
   if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
@@ -317,6 +320,30 @@ sys_open(void)
   }
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
+    iunlockput(ip);
+    end_op();
+    return -1;
+  }
+
+  if(!(omode & O_NOFOLLOW)){
+    for(;cnt < 10 && ip->type == T_SYMLINK; cnt++){
+      readi(ip,0,(uint64)&length,0,4);
+      readi(ip,0,(uint64)next,4,length);
+      /* writei(newip,0,(uint64)&length,0,4); */
+      /* writei(newip,0,(uint64)target,4,length+1); */
+      next[length] = 0;
+      iunlockput(ip);
+      ip = namei(next);
+      if(ip == 0){
+        // destination is symlink or target not exist
+        end_op();
+        return -1;
+      }
+      ilock(ip);
+    }
+  }
+  if(cnt >= 10){
+    // might have a cycle here
     iunlockput(ip);
     end_op();
     return -1;
@@ -482,5 +509,36 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+int len(char *array){
+  int res = 0;
+  for( ;res < MAXPATH && array[res] != 0; res++);
+  return res;
+}
+
+uint64 sys_symlink(void){
+  char target[MAXPATH], path[MAXPATH];
+  struct inode *newip;
+
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0) // zoberiem si argumenty
+    return -1;
+
+  begin_op();  // funkcia ktora sa ma volat pred kazdou operaciou s FS
+  // create a symlink file
+  newip = create(path, T_SYMLINK, 0, 0);
+  if(newip == 0){
+    end_op();
+    return -1;
+  }
+
+  // write the target path length and path into new inode
+  int length = len(target);
+  writei(newip,0,(uint64)&length,0,4);
+  writei(newip,0,(uint64)target,4,length+1);
+  iunlockput(newip);
+
+  end_op();
   return 0;
 }
