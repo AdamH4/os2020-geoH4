@@ -80,6 +80,18 @@ struct trapframe {
   /* 280 */ uint64 t6;
 };
 
+struct vma {  // virtual memory address
+  uint64 addr;
+  int length;
+  int prot;
+  int flags;
+  int offset;
+  int used;
+  struct file *pf;
+};
+
+#define NVMA 16
+
 enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
@@ -87,6 +99,7 @@ struct proc {
   struct spinlock lock;
 
   // p->lock must be held when using these:
+  struct vma vmatable[NVMA];   // pole na ukladanie vma
   enum procstate state;        // Process state
   struct proc *parent;         // Parent process
   void *chan;                  // If non-zero, sleeping on chan
@@ -104,3 +117,4 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 };
+

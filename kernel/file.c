@@ -180,3 +180,14 @@ filewrite(struct file *f, uint64 addr, int n)
   return ret;
 }
 
+// Decrement ref count for file f, the lock is held
+// na rozdiel of filedup odoberam referenciu a to je ine
+int filederef(struct file* f)
+{
+  acquire(&ftable.lock);
+  if(f->ref < 1)
+    panic("filederef");
+  int r = f->ref--;
+  release(&ftable.lock);
+  return r;
+}
